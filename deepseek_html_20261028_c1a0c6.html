@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Автоматизация ИПР — прототип с AI-помощником (hard/soft)</title>
+<!--
+  КОНФИГУРАЦИЯ КЛЮЧА DeepSeek API (в этом файле ключа нет).
+
+  Вариант A — внешний конфиг (рекомендуется для команды/деплоя):
+    1. Создайте рядом с этим файлом config.js:
+         window.APP_CONFIG = { DEEPSEEK_API_KEY: 'sk-...' };
+    2. Подключите его ДО основного скрипта:
+         <script src="config.js"></script>
+    3. Добавьте config.js в .gitignore — в репозиторий он не попадёт.
+
+  Вариант B — без конфига: при первом запросе к ИИ браузер
+    спросит ключ через prompt. Он хранится только в sessionStorage
+    (сбрасывается при закрытии вкладки) и не пишется на диск.
+-->
+<style>
+  :root{
+    --bg:#f4f6fb; --card:#fff; --line:#e2e8f0; --text:#0f172a; --muted:#64748b;
+    --primary:#2563eb; --primary-d:#1d4ed8; --danger:#dc2626; --danger-bg:#fef2f2;
+    --success:#16a34a; --warn:#d97706; --radius:10px; --ai:#7c3aed; --ai-bg:#f5f3ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+       background:var(--bg);color:var(--text);font-size:14px;line-height:1.45}
+  header.app{background:#0f172a;color:#fff;padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header.app h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.2px}
+  header.app .spacer{flex:1}
+  header.app .user{display:flex;align-items:center;gap:12px;font-size:13px;flex-wrap:wrap}
+  header.app label{display:flex;align-items:center;gap:6px;color:#cbd5e1}
+  header.app select{background:#1e293b;color:#fff;border:1px solid #334155;border-radius:6px;padding:5px 8px;font:inherit}
+  header.app select:focus{outline:2px solid #3b82f6}
+  nav.tabs{display:flex;gap:4px;padding:10px 20px 0;flex-wrap:wrap;background:var(--bg);border-bottom:1px solid var(--line)}
+  nav.tabs button{background:transparent;border:1px solid transparent;border-bottom:none;padding:9px 14px;
+    border-radius:8px 8px 0 0;cursor:pointer;color:var(--muted);font-size:13px;font-weight:500;font:inherit}
+  nav.tabs button:hover{color:var(--text)}
+  nav.tabs button.active{background:var(--card);border-color:var(--line);color:var(--text)}
+  nav.tabs button .badge{background:var(--danger);color:#fff;border-radius:10px;padding:0 6px;font-size:11px;margin-left:6px;display:inline-block;min-width:16px;text-align:center}
+  main{padding:16px 20px 40px;max-width:1240px;margin:0 auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+  .card h2{font-size:15px;margin:0 0 12px;font-weight:600}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+  label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+  label.f span{color:var(--text);font-weight:500}
+  input,select,textarea{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--text);width:100%}
+  input:focus,select:focus,textarea:focus{outline:2px solid #bfdbfe;border-color:var(--primary)}
+  input.invalid,select.invalid,textarea.invalid{border-color:var(--danger)!important;background:var(--danger-bg)!important}
+  select:disabled{background:#f1f5f9;color:#94a3b8;cursor:not-allowed}
+  .tbl-wrap{overflow-x:auto;border-radius:8px}
+  table.ipr{width:100%;border-collapse:collapse;min-width:1080px}
+  table.ipr th,table.ipr td{border:1px solid var(--line);padding:6px;vertical-align:top}
+  table.ipr th{background:#f1f5f9;font-size:12px;text-align:left;font-weight:600;position:sticky;top:0;z-index:1}
+  table.ipr td.num{text-align:center;color:var(--muted);width:36px;font-size:12px;padding-top:14px}
+  table.ipr input,table.ipr select{font-size:13px;padding:6px 8px}
+  .row-actions{display:flex;gap:10px;justify-content:space-between;margin-top:10px;flex-wrap:wrap;align-items:center}
+  .row-actions .right{display:flex;gap:8px;flex-wrap:wrap}
+  button.btn{font:inherit;padding:9px 16px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;font-weight:500;transition:background .15s}
+  button.btn:hover{background:#f8fafc}
+  button.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+  button.btn.primary:hover{background:var(--primary-d)}
+  button.btn.primary:disabled{opacity:.45;cursor:not-allowed;background:var(--primary);border-color:var(--primary)}
+  button.btn.danger{color:var(--danger);border-color:#fecaca}
+  button.btn.danger:hover{background:#fef2f2}
+  button.btn.sm{padding:5px 10px;font-size:12px}
+  button.btn.ai{background:var(--ai);border-color:var(--ai);color:#fff}
+  button.btn.ai:hover{background:#6d28d9}
+  button.btn.ai:disabled{opacity:.45;cursor:not-allowed}
+  .hint{font-size:12px;color:var(--muted)}
+  .hint.ok{color:var(--success)}
+  .hint.err{color:var(--danger)}
+  .summary{font-size:13px;color:var(--danger);margin-top:10px;padding:8px 12px;background:var(--danger-bg);border:1px solid #fecaca;border-radius:8px;display:none}
+  .summary.show{display:block}
+  .toast{position:fixed;right:20px;bottom:20px;background:#0f172a;color:#fff;padding:12px 16px;border-radius:8px;
+    font-size:13px;opacity:0;transform:translateY(8px);transition:.25s;pointer-events:none;z-index:1000;max-width:420px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .toast.show{opacity:1;transform:none}
+  .toast.ok{background:#14532d}
+  .toast.err{background:#7f1d1d}
+  .list-item{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;background:#fff}
+  .list-item.new{background:#fffbeb;border-color:#fde68a}
+  .list-item .meta{font-size:12px;color:var(--muted);margin-top:3px}
+  .list-item .grow{flex:1;min-width:220px}
+  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;background:#e0e7ff;color:#3730a3;margin-right:4px;font-weight:500}
+  .pill.new{background:#fef3c7;color:#92400e}
+  .pill.accepted{background:#dcfce7;color:#166534}
+  .pill.rejected{background:#fee2e2;color:#991b1b}
+  .pill.ai{background:#ede9fe;color:#6d28d9}
+  .pill.hard{background:#dbeafe;color:#1e40af}
+  .pill.soft{background:#fce7f3;color:#9d174d}
+  .kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+  .kpi .box{background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:16px}
+  .kpi .box .v{font-size:28px;font-weight:700;line-height:1.1}
+  .kpi .box .l{font-size:12px;color:var(--muted);margin-top:4px}
+  .versions .v{border-left:3px solid var(--primary);padding:6px 12px;margin-bottom:12px;background:#f8fafc;border-radius:0 6px 6px 0}
+  .versions .v .when{font-size:12px;color:var(--muted)}
+  .versions .v ul{margin:6px 0 0;padding-left:18px;font-size:13px}
+  .versions .v ul li{margin:2px 0}
+  .empty{color:var(--muted);font-size:13px;padding:12px 0}
+  .print-only{display:none}
+  .info-bar{font-size:12px;color:var(--muted);padding:8px 20px;background:#eff6ff;border-bottom:1px solid #dbeafe}
+
+  /* AI-блок */
+  .ai-card{border-color:#ddd6fe;background:linear-gradient(180deg,#faf5ff 0%,#fff 60%)}
+  .ai-card h2{color:var(--ai);display:flex;align-items:center;gap:8px}
+  .ai-row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:8px}
+  .ai-row textarea{min-height:68px;resize:vertical}
+  .ai-suggestions{margin-top:14px;display:grid;gap:10px}
+  .suggestion{border:1px solid #e9d5ff;border-radius:10px;padding:12px 14px;background:#fff;position:relative}
+  .suggestion .head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap}
+  .suggestion .goal{font-weight:600;margin-bottom:6px}
+  .suggestion .detail{font-size:13px;color:#334155;display:grid;gap:4px;margin-top:6px}
+  .suggestion .detail b{color:#475569;font-weight:600}
+  .suggestion .actions{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
+  .suggestion .num{display:inline-flex;width:22px;height:22px;border-radius:50%;background:var(--ai);color:#fff;font-size:12px;align-items:center;justify-content:center;font-weight:700;margin-right:6px}
+  .ai-status{margin-top:10px;font-size:13px}
+  .ai-status.loading{color:var(--ai)}
+  .ai-status.error{color:var(--danger)}
+  .ai-status.ok{color:var(--success)}
+  .spinner{display:inline-block;width:14px;height:14px;border:2px solid #ddd6fe;border-top-color:var(--ai);border-radius:50%;animation:spin .7s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  @media print{
+    @page{size:A4 landscape;margin:10mm}
+    header.app,nav.tabs,.row-actions,.no-print,button.btn,.hint,.summary,.info-bar,.screen-title,.ai-card{display:none!important}
+    body{background:#fff;font-size:11px;color:#000}
+    main{padding:0;max-width:none}
+    .card{border:none;padding:0;margin:0 0 10px;box-shadow:none;background:#fff}
+    .tbl-wrap{overflow:visible}
+    input,select{border:none!important;background:#fff!important;padding:0!important;appearance:none;font-size:11px!important;color:#000}
+    select{-webkit-appearance:none;appearance:none}
+    table.ipr{min-width:0;width:100%}
+    table.ipr th{background:#eee!important;color:#000;position:static;font-size:10px}
+    table.ipr th,table.ipr td{border:1px solid #999!important;padding:4px}
+    table.ipr td{page-break-inside:avoid}
+    .grid{gap:6px}
+    .grid .f span{font-size:10px;color:#555}
+    .print-only{display:block}
+  }
+  @media (max-width:640px){
+    main{padding:12px}
+    header.app{padding:10px 12px}
+    header.app h1{font-size:14px}
+    .card{padding:12px}
+  }
+</style>
+</head>
+<body>
+
+<header class="app">
+  <h1>Автоматизация ИПР</h1>
+  <div class="spacer"></div>
+  <div class="user">
+    <label>Сотрудник:
+      <select id="empSelect"></select>
+    </label>
+    <label>Роль в системе:
+      <select id="roleSelect">
+        <option value="user">Пользователь</option>
+        <option value="specialist">Специалист по оценке</option>
+      </select>
+    </label>
+  </div>
+</header>
+
+<div class="info-bar">
+  Демо-прототип. Данные сохраняются в localStorage. AI-помощник использует DeepSeek API: определяет тип компетенции (hard/soft) и предлагает конкретное название. Ключ не хранится в файле — подключается через config.js или запрашивается при первом обращении.
+</div>
+
+<nav class="tabs" id="tabs">
+  <button data-tab="ipr" class="active">ИПР</button>
+  <button data-tab="history">История версий</button>
+  <button data-tab="custom" id="tabCustom">Кастомные значения<span class="badge" id="customBadge" style="display:none">0</span></button>
+  <button data-tab="analytics" id="tabAnalytics">Аналитика</button>
+</nav>
+
+<main>
+
+  <!-- ЭКРАН ИПР -->
+  <section id="screen-ipr">
+    <div class="print-only" style="margin-bottom:12px;border-bottom:1px solid #999;padding-bottom:6px">
+      <h2 style="margin:0 0 4px;font-size:14px">Индивидуальный план развития</h2>
+      <div style="font-size:11px;color:#444">Сформирован: <span id="printDate"></span></div>
+    </div>
+
+    <div class="card">
+      <h2 class="screen-title">Шапка ИПР</h2>
+      <div class="grid">
+        <label class="f"><span>ФИО сотрудника *</span><input id="h_name" autocomplete="off"></label>
+        <label class="f"><span>Роль *</span><input id="h_role" autocomplete="off"></label>
+        <label class="f"><span>Команда *</span><input id="h_team" autocomplete="off"></label>
+        <label class="f"><span>Грейд *</span><input id="h_grade" autocomplete="off"></label>
+        <label class="f"><span>Ссылка на результаты оценки *</span><input id="h_evalLink" placeholder="https://..." autocomplete="off"></label>
+        <label class="f"><span>ФИО руководителя/эксперта *</span><input id="h_manager" autocomplete="off"></label>
+      </div>
+    </div>
+
+    <!-- AI-ПОМОЩНИК -->
+    <div class="card ai-card no-print">
+      <h2><span style="font-size:18px">✨</span> AI-помощник: что развивать?</h2>
+      <div class="hint" style="margin-bottom:8px">
+        Опишите словами, что сотруднику нужно развить. ИИ определит, о какой компетенции идёт речь — <b>hard</b> (профессиональная) или <b>soft</b> (надпрофессиональная), — и предложит её конкретное название и 4–5 вариантов развивающих действий. Работает и для технических ролей: если описание про софт-навык, ИИ так и укажет.
+      </div>
+      <div class="ai-row">
+        <label class="f" style="flex:1 1 360px">
+          <span>Описание потребности в развитии</span>
+          <textarea id="aiPrompt" placeholder="Например: разработчику нужно научиться объяснять решения коллегам и проводить код-ревью так, чтобы замечания воспринимались конструктивно…"></textarea>
+        </label>
+        <button class="btn ai" id="aiSuggestBtn" style="height:42px">Предложить варианты</button>
+      </div>
+      <div class="ai-status" id="aiStatus"></div>
+      <div class="ai-suggestions" id="aiSuggestions"></div>
+    </div>
+
+    <div class="card">
+      <h2 class="screen-title">План развития</h2>
+      <div class="tbl-wrap">
+        <table class="ipr">
+          <thead>
+            <tr>
+              <th>№</th>
+              <th>Цель развития</th>
+              <th>Компетенция</th>
+              <th>Индикатор компетенции</th>
+              <th>Способ развития</th>
+              <th>Мероприятия по развитию</th>
+              <th>Критерии оценки результата</th>
+              <th>Срок</th>
+              <th class="no-print"></th>
+            </tr>
+          </thead>
+          <tbody id="rowsBody"></tbody>
+        </table>
+      </div>
+      <div class="row-actions no-print">
+        <div class="right">
+          <button class="btn" id="addRowBtn">＋ Добавить строку</button>
+          <button class="btn" id="demoFillBtn" title="Заполнить первую пустую строку примером">Демо: заполнить примером</button>
+        </div>
+      </div>
+      <div class="summary" id="validationSummary"></div>
+    </div>
+
+    <div class="card no-print" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button class="btn primary" id="saveBtn" disabled>Сохранить и отправить</button>
+      <button class="btn" id="pdfBtn">Скачать PDF</button>
+      <span class="hint" id="saveHint"></span>
+    </div>
+  </section>
+
+  <!-- ИСТОРИЯ -->
+  <section id="screen-history" style="display:none">
+    <div class="card">
+      <h2 class="screen-title">История версий</h2>
+      <div id="historyList" class="versions"></div>
+    </div>
+  </section>
+
+  <!-- КАСТОМНЫЕ ЗНАЧЕНИЯ -->
+  <section id="screen-custom" style="display:none">
+    <div class="card">
+      <h2 class="screen-title">Кастомные значения</h2>
+      <div class="hint" style="margin-bottom:10px">Значения, добавленные пользователями в ИПР. Новые подсвечиваются.</div>
+      <div id="customList"></div>
+    </div>
+  </section>
+
+  <!-- АНАЛИТИКА -->
+  <section id="screen-analytics" style="display:none">
+    <div class="card">
+      <h2 class="screen-title">Аналитика</h2>
+      <div class="kpi" id="kpi"></div>
+    </div>
+  </section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<!-- Опционально: подключите внешний конфиг с ключом (не коммитится в репозиторий).
+     Если файла нет — браузер спросит ключ при первом запросе к ИИ.
+<script src="config.js"></script>
+-->
+
+<script>
+/* ============================ СПРАВОЧНИКИ (демо) ============================ */
+const DICT = {
+  competencies: {
+    'Разработчик': ['Алгоритмы и структуры данных', 'Архитектура ПО', 'Качество кода'],
+    'Аналитик': ['Сбор требований', 'Моделирование процессов', 'Коммуникация с заказчиком'],
+    'Тестировщик': ['Тест-дизайн', 'Автоматизация тестирования', 'Управление дефектами'],
+    'Менеджер проекта': ['Планирование', 'Управление рисками']
+  },
+  softCompetencies: [
+    'Коммуникация',
+    'Работа в команде',
+    'Эмоциональный интеллект',
+    'Управление временем',
+    'Критическое мышление',
+    'Лидерство',
+    'Наставничество',
+    'Гибкость и адаптивность',
+    'Публичные выступления',
+    'Управление конфликтами'
+  ],
+  indicators: {
+    'Алгоритмы и структуры данных': ['Знает базовые структуры данных', 'Решает задачи уровня middle', 'Оптимизирует сложные алгоритмы'],
+    'Архитектура ПО': ['Понимает принципы SOLID', 'Проектирует модули', 'Проектирует системы'],
+    'Качество кода': ['Соблюдает код-стайл', 'Проводит код-ревью', 'Внедряет практики качества'],
+    'Сбор требований': ['Собирает требования по шаблону', 'Проводит интервью', 'Управляет backlog'],
+    'Моделирование процессов': ['Строит BPMN', 'Моделирует as-is / to-be', 'Оптимизирует процессы'],
+    'Коммуникация с заказчиком': ['Проводит встречи', 'Согласует требования', 'Управляет ожиданиями'],
+    'Тест-дизайн': ['Пишет тест-кейсы', 'Применяет техники тест-дизайна', 'Проектирует стратегию тестирования'],
+    'Автоматизация тестирования': ['Пишет простые автотесты', 'Поддерживает фреймворк', 'Проектирует архитектуру тестов'],
+    'Управление дефектами': ['Оформляет баг-репорты', 'Приоритизирует дефекты', 'Анализирует метрики дефектов'],
+    'Планирование': ['Составляет план', 'Управляет сроками', 'Планирует ресурсы'],
+    'Управление рисками': ['Выявляет риски', 'Оценивает риски', 'Разрабатывает митигации']
+  },
+  softIndicators: {
+    'Коммуникация': ['Ясно и структурированно излагает мысли', 'Активно слушает и уточняет', 'Адаптирует стиль общения под аудиторию'],
+    'Работа в команде': ['Поддерживает коллег и делится знаниями', 'Конструктивно участвует в обсуждениях', 'Помогает команде достигать целей'],
+    'Эмоциональный интеллект': ['Распознаёт свои эмоции и управляет ими', 'Понимает эмоции коллег', 'Сохраняет спокойствие в стрессе'],
+    'Управление временем': ['Планирует свою работу', 'Расставляет приоритеты', 'Соблюдает сроки'],
+    'Критическое мышление': ['Проверяет факты и допущения', 'Оценивает альтернативы', 'Делает обоснованные выводы'],
+    'Лидерство': ['Берёт на себя ответственность', 'Мотивирует команду', 'Принимает решения в неопределённости'],
+    'Наставничество': ['Проводит онбординг', 'Даёт развивающую обратную связь', 'Помогает коллегам расти'],
+    'Гибкость и адаптивность': ['Быстро адаптируется к изменениям', 'Меняет подход при необходимости', 'Сохраняет продуктивность в неопределённости'],
+    'Публичные выступления': ['Готовит структурированные презентации', 'Уверенно выступает перед аудиторией', 'Работает с вопросами и возражениями'],
+    'Управление конфликтами': ['Выявляет причины конфликта', 'Находит конструктивное решение', 'Сохраняет рабочие отношения']
+  },
+  methods: ['Курс', 'Менторство', 'Практика на проекте', 'Книга', 'Воркшоп'],
+  activities: ['Онлайн-курс', 'Воркшоп', 'Стажировка', 'Участие в проекте', 'Конференция']
+};
+
+const EMPLOYEES = [
+  { id:'e1', name:'Иванов Иван Иванович', email:'ivanov@corp.ru', role:'Разработчик', team:'Альфа', grade:'Middle', manager:'Петров Пётр', evalLink:'https://corp.ru/eval/ivanov' },
+  { id:'e2', name:'Смирнова Анна Сергеевна', email:'smirnova@corp.ru', role:'Аналитик', team:'Бета', grade:'Senior', manager:'Петров Пётр', evalLink:'https://corp.ru/eval/smirnova' },
+  { id:'e3', name:'Кузнецов Олег', email:'kuznetsov@corp.ru', role:'Тестировщик', team:'Гамма', grade:'Junior', manager:'Сидорова Мария', evalLink:'https://corp.ru/eval/kuznetsov' },
+  { id:'e4', name:'Попова Дарья', email:'popova@corp.ru', role:'Менеджер проекта', team:'Альфа', grade:'Lead', manager:'Сидорова Мария', evalLink:'https://corp.ru/eval/popova' }
+];
+
+/* ============================ ХЕЛПЕРЫ СПРАВОЧНИКА ============================ */
+function getCompetenciesForRole(role){
+  const hard = DICT.competencies[role] || Object.values(DICT.competencies).flat();
+  return [...new Set([...hard, ...DICT.softCompetencies])];
+}
+function getIndicatorsForCompetency(competency){
+  const hard = DICT.indicators[competency] || [];
+  const soft = DICT.softIndicators[competency] || [];
+  return [...new Set([...hard, ...soft])];
+}
+
+/* ============================ СОСТОЯНИЕ ============================ */
+const STORAGE_KEY = 'ipr_app_v4';
+let currentTab = 'ipr';
+let toastTimer = null;
+let lastAiSuggestions = [];
+
+function loadState(){
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (!s.docs) s.docs = {};
+      if (!s.customValues) s.customValues = [];
+      if (!s.currentEmployeeId) s.currentEmployeeId = 'e1';
+      if (!s.currentRole) s.currentRole = 'user';
+      return s;
+    }
+  } catch(e){}
+  return { docs:{}, customValues:[], currentEmployeeId:'e1', currentRole:'user' };
+}
+let state = loadState();
+function persist(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }catch(e){} }
+
+/* ============================ УТИЛИТЫ ============================ */
+function esc(s){
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function emptyRow(){
+  return { goal:'', competency:'', indicator:'', method:'', activity:'', criteria:'', deadline:'' };
+}
+function rowHasData(row){
+  return Object.values(row).some(v => v && String(v).trim());
+}
+function isValidUrl(s){ try{ new URL(s); return true; }catch(e){ return false; } }
+
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+const MAX_DATE = new Date(TODAY.getFullYear(), TODAY.getMonth()+6, TODAY.getDate());
+const MIN_ISO = TODAY.toISOString().slice(0,10);
+const MAX_ISO = MAX_DATE.toISOString().slice(0,10);
+
+function getDoc(empId){
+  if (!state.docs[empId]) {
+    const emp = EMPLOYEES.find(e => e.id === empId) || EMPLOYEES[0];
+    state.docs[empId] = {
+      header: {
+        name: emp.name, role: emp.role, team: emp.team, grade: emp.grade,
+        evalLink: emp.evalLink, manager: emp.manager
+      },
+      rows: Array.from({ length: 10 }, emptyRow),
+      versions: [],
+      lastSaved: null
+    };
+    persist();
+  }
+  const d = state.docs[empId];
+  if (!d.versions) d.versions = [];
+  if (typeof d.lastSaved === 'undefined') d.lastSaved = null;
+  return d;
+}
+
+/* ============================ ВАЛИДАЦИЯ ============================ */
+function validateDoc(doc){
+  const errors = [];
+  const reqHeader = ['name','role','team','grade','evalLink','manager'];
+  reqHeader.forEach(k => {
+    if (!doc.header[k] || !String(doc.header[k]).trim()) {
+      errors.push({ scope:'header', field:k, msg:'Заполните поле шапки' });
+    }
+  });
+  if (doc.header.evalLink && !isValidUrl(doc.header.evalLink)) {
+    errors.push({ scope:'header', field:'evalLink', msg:'Некорректная ссылка' });
+  }
+
+  const activeRows = doc.rows.filter(rowHasData);
+  if (activeRows.length === 0) {
+    errors.push({ scope:'rows', msg:'Добавьте хотя бы одну заполненную строку' });
+  }
+
+  const fields = ['goal','competency','indicator','method','activity','criteria','deadline'];
+  doc.rows.forEach((row, i) => {
+    if (!rowHasData(row)) return;
+    fields.forEach(f => {
+      if (!row[f] || !String(row[f]).trim()) {
+        errors.push({ scope:'row', idx:i, field:f, msg:'Заполните поле' });
+      }
+    });
+    if (row.deadline) {
+      const d = new Date(row.deadline + 'T00:00:00');
+      if (isNaN(d.getTime())) {
+        errors.push({ scope:'row', idx:i, field:'deadline', msg:'Некорректная дата' });
+      } else if (d < TODAY) {
+        errors.push({ scope:'row', idx:i, field:'deadline', msg:'Дата не в прошлом' });
+      } else if (d > MAX_DATE) {
+        errors.push({ scope:'row', idx:i, field:'deadline', msg:'Не позже +6 месяцев' });
+      }
+    }
+  });
+  return errors;
+}
+
+function validateLive(){
+  const doc = getDoc(state.currentEmployeeId);
+  const errors = validateDoc(doc);
+  const saveBtn = document.getElementById('saveBtn');
+  saveBtn.disabled = errors.length > 0;
+
+  const summary = document.getElementById('validationSummary');
+  const hint = document.getElementById('saveHint');
+
+  document.querySelectorAll('.invalid').forEach(el => el.classList.remove('invalid'));
+  errors.forEach(err => {
+    if (err.scope === 'header') {
+      const el = document.getElementById('h_' + err.field);
+      if (el) el.classList.add('invalid');
+    } else if (err.scope === 'row') {
+      const el = document.querySelector(`[data-field="${err.field}"][data-idx="${err.idx}"]`);
+      if (el) el.classList.add('invalid');
+    }
+  });
+
+  if (errors.length === 0) {
+    summary.classList.remove('show');
+    summary.textContent = '';
+    hint.textContent = 'Все обязательные поля заполнены — можно сохранить.';
+    hint.className = 'hint ok';
+  } else {
+    const headErrs = errors.filter(e => e.scope === 'header').length;
+    const rowErrs = errors.filter(e => e.scope === 'row').length;
+    const noRows = errors.some(e => e.scope === 'rows');
+    const parts = [];
+    if (headErrs) parts.push(headErrs + ' в шапке');
+    if (rowErrs) parts.push(rowErrs + ' в таблице');
+    if (noRows) parts.push('нет ни одной заполненной строки');
+    summary.textContent = 'Заполните обязательные поля: ' + parts.join(', ') + '.';
+    summary.classList.add('show');
+    hint.textContent = '';
+    hint.className = 'hint';
+  }
+}
+
+/* ============================ РЕНДЕР СЕЛЕКТОВ ============================ */
+function optionList(values, current, placeholder){
+  const list = [...values];
+  if (current && !list.includes(current)) list.unshift(current);
+  let html = `<option value="">${esc(placeholder)}</option>`;
+  list.forEach(v => {
+    html += `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`;
+  });
+  return html;
+}
+
+function competencySelect(idx, current){
+  const doc = getDoc(state.currentEmployeeId);
+  const role = doc.header.role;
+  const hard = DICT.competencies[role] || [];
+  const soft = DICT.softCompetencies;
+  const custom = state.customValues
+    .filter(c => c.type === 'competency' && c.status !== 'rejected')
+    .map(c => c.value);
+
+  const known = new Set([...hard, ...soft, ...custom]);
+  const extra = current && !known.has(current) ? [current] : [];
+
+  let html = `<select data-field="competency" data-idx="${idx}">`;
+  html += `<option value="">— выберите —</option>`;
+  if (hard.length) {
+    html += `<optgroup label="Hard (по роли)">`;
+    [...new Set(hard)].forEach(v => {
+      html += `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`;
+    });
+    html += `</optgroup>`;
+  }
+  if (soft.length) {
+    html += `<optgroup label="Soft (универсальные)">`;
+    soft.forEach(v => {
+      html += `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`;
+    });
+    html += `</optgroup>`;
+  }
+  if (custom.length) {
+    html += `<optgroup label="Кастомные">`;
+    [...new Set(custom)].forEach(v => {
+      if (hard.includes(v) || soft.includes(v)) return;
+      html += `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`;
+    });
+    html += `</optgroup>`;
+  }
+  if (extra.length) {
+    html += `<optgroup label="Из рекомендации ИИ">`;
+    extra.forEach(v => {
+      html += `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(v)}</option>`;
+    });
+    html += `</optgroup>`;
+  }
+  html += `<option value="__custom__">＋ Добавить своё…</option>`;
+  html += `</select>`;
+  return html;
+}
+
+function indicatorSelect(idx, competency, current){
+  if (!competency) {
+    return `<select disabled><option>— сначала компетенция —</option></select>`;
+  }
+  const base = getIndicatorsForCompetency(competency);
+  const custom = state.customValues
+    .filter(c => c.type === 'indicator' && c.parent === competency && c.status !== 'rejected')
+    .map(c => c.value);
+  const values = [...new Set([...base, ...custom])];
+  return `<select data-field="indicator" data-idx="${idx}">${optionList(values, current, '— выберите —')}<option value="__custom__">＋ Добавить своё…</option></select>`;
+}
+
+function methodSelect(idx, current){
+  const base = DICT.methods;
+  const custom = state.customValues
+    .filter(c => c.type === 'method' && c.status !== 'rejected')
+    .map(c => c.value);
+  const values = [...new Set([...base, ...custom])];
+  return `<select data-field="method" data-idx="${idx}">${optionList(values, current, '— выберите —')}<option value="__custom__">＋ Добавить своё…</option></select>`;
+}
+
+function activitySelect(idx, current){
+  const base = DICT.activities;
+  const custom = state.customValues
+    .filter(c => c.type === 'activity' && c.status !== 'rejected')
+    .map(c => c.value);
+  const values = [...new Set([...base, ...custom])];
+  return `<select data-field="activity" data-idx="${idx}">${optionList(values, current, '— выберите —')}<option value="__custom__">＋ Добавить своё…</option></select>`;
+}
+
+/* ============================ РЕНДЕР ИПР ============================ */
+function renderHeader(){
+  const doc = getDoc(state.currentEmployeeId);
+  ['name','role','team','grade','evalLink','manager'].forEach(k => {
+    document.getElementById('h_' + k).value = doc.header[k] || '';
+  });
+}
+
+function renderRows(){
+  const doc = getDoc(state.currentEmployeeId);
+  const body = document.getElementById('rowsBody');
+  body.innerHTML = doc.rows.map((row, idx) => `
+    <tr>
+      <td class="num">${idx + 1}</td>
+      <td><input data-field="goal" data-idx="${idx}" value="${esc(row.goal)}" placeholder="Например: выйти на уровень middle" autocomplete="off"></td>
+      <td>${competencySelect(idx, row.competency)}</td>
+      <td>${indicatorSelect(idx, row.competency, row.indicator)}</td>
+      <td>${methodSelect(idx, row.method)}</td>
+      <td>${activitySelect(idx, row.activity)}</td>
+      <td><input data-field="criteria" data-idx="${idx}" value="${esc(row.criteria)}" placeholder="Например: успешная защита" autocomplete="off"></td>
+      <td><input type="date" data-field="deadline" data-idx="${idx}" value="${esc(row.deadline)}" min="${MIN_ISO}" max="${MAX_ISO}"></td>
+      <td class="no-print"><button class="btn sm danger" data-del="${idx}" title="Удалить строку">✕</button></td>
+    </tr>
+  `).join('');
+  validateLive();
+}
+
+/* ============================ ИСТОРИЯ ============================ */
+function renderHistory(){
+  const doc = getDoc(state.currentEmployeeId);
+  const list = document.getElementById('historyList');
+  if (!doc.versions || doc.versions.length === 0) {
+    list.innerHTML = '<div class="empty">Изменений пока нет. Сохраните ИПР, чтобы появилась первая версия.</div>';
+    return;
+  }
+  const items = [...doc.versions].reverse();
+  list.innerHTML = items.map(v => `
+    <div class="v">
+      <div class="when">${new Date(v.ts).toLocaleString('ru-RU')} · ${esc(v.user)}</div>
+      <ul>${v.changes.map(c => `<li>${esc(c)}</li>`).join('')}</ul>
+    </div>
+  `).join('');
+}
+
+function diffDocs(a, b){
+  const out = [];
+  const labels = { name:'ФИО сотрудника', role:'Роль', team:'Команда', grade:'Грейд', evalLink:'Ссылка на оценку', manager:'Руководитель/эксперт' };
+  Object.keys(labels).forEach(k => {
+    if ((a.header[k] || '') !== (b.header[k] || '')) out.push('Шапка: ' + labels[k]);
+  });
+  const rowsA = a.rows.filter(rowHasData).length;
+  const rowsB = b.rows.filter(rowHasData).length;
+  if (rowsA !== rowsB) out.push(`Заполненных строк: ${rowsA} → ${rowsB}`);
+  const max = Math.max(a.rows.length, b.rows.length);
+  for (let i = 0; i < max; i++) {
+    const ra = a.rows[i], rb = b.rows[i];
+    if (!ra || !rb || JSON.stringify(ra) !== JSON.stringify(rb)) {
+      out.push('Строка ' + (i + 1) + ': изменения');
+    }
+  }
+  return out.length ? out : ['Без содержательных изменений'];
+}
+
+/* ============================ КАСТОМНЫЕ ЗНАЧЕНИЯ ============================ */
+function updateCustomBadge(){
+  const n = state.customValues.filter(c => c.status === 'new').length;
+  const badge = document.getElementById('customBadge');
+  if (n > 0) { badge.textContent = n; badge.style.display = 'inline-block'; }
+  else badge.style.display = 'none';
+}
+
+function renderCustom(){
+  const list = document.getElementById('customList');
+  const items = state.customValues;
+  if (!items.length) {
+    list.innerHTML = '<div class="empty">Пока нет кастомных значений. Добавьте своё значение в любом выпадающем списке ИПР.</div>';
+    return;
+  }
+  const typeLabels = { competency:'Компетенция', indicator:'Индикатор', method:'Способ развития', activity:'Мероприятие' };
+  const statusLabels = { new:'Новое', accepted:'Принято', rejected:'Отклонено' };
+  const sorted = [...items].sort((a, b) => {
+    const rank = x => x.status === 'new' ? 0 : 1;
+    return rank(a) - rank(b) || new Date(b.date) - new Date(a.date);
+  });
+  list.innerHTML = sorted.map(cv => {
+    const emp = EMPLOYEES.find(e => e.id === cv.employeeId);
+    return `<div class="list-item ${cv.status === 'new' ? 'new' : ''}">
+      <div class="grow">
+        <div>
+          <span class="pill ${cv.status}">${statusLabels[cv.status] || cv.status}</span>
+          <span class="pill">${typeLabels[cv.type] || cv.type}</span>
+          <strong>${esc(cv.value)}</strong>
+        </div>
+        <div class="meta">
+          Добавил: ${esc(cv.addedBy)} · ИПР: ${emp ? esc(emp.name) : '—'} · ${new Date(cv.date).toLocaleString('ru-RU')}
+          ${cv.parent ? ' · Компетенция: ' + esc(cv.parent) : ''}
+        </div>
+      </div>
+      ${cv.status === 'new' ? `
+        <button class="btn sm" data-accept="${cv.id}">Принять</button>
+        <button class="btn sm danger" data-reject="${cv.id}">Отклонить</button>
+      ` : ''}
+    </div>`;
+  }).join('');
+
+  list.querySelectorAll('[data-accept]').forEach(b => b.addEventListener('click', () => {
+    const cv = state.customValues.find(x => x.id === b.dataset.accept);
+    if (!cv) return;
+    cv.status = 'accepted';
+    persist();
+    renderCustom(); updateCustomBadge(); renderRows();
+    toast('Значение принято в справочник', 'ok');
+  }));
+  list.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', () => {
+    const cv = state.customValues.find(x => x.id === b.dataset.reject);
+    if (!cv) return;
+    cv.status = 'rejected';
+    persist();
+    renderCustom(); updateCustomBadge(); renderRows();
+    toast('Значение отклонено');
+  }));
+}
+
+/* ============================ АНАЛИТИКА ============================ */
+function renderAnalytics(){
+  let total = 0, filled = 0;
+  EMPLOYEES.forEach(emp => {
+    const doc = state.docs[emp.id];
+    if (!doc || !doc.versions || doc.versions.length === 0) return;
+    total++;
+    if (validateDoc(doc).length === 0) filled++;
+  });
+  const pct = total ? Math.round(filled / total * 100) : 0;
+  document.getElementById('kpi').innerHTML = `
+    <div class="box"><div class="v">${total}</div><div class="l">Количество сохранённых ИПР</div></div>
+    <div class="box"><div class="v">${pct}%</div><div class="l">Доля заполненных ИПР (без ошибок валидации)</div></div>
+  `;
+}
+
+/* ============================ ВКЛАДКИ ============================ */
+function switchTab(name){
+  currentTab = name;
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  ['ipr','history','custom','analytics'].forEach(s => {
+    document.getElementById('screen-' + s).style.display = s === name ? '' : 'none';
+  });
+  if (name === 'ipr') { renderHeader(); renderRows(); }
+  if (name === 'history') renderHistory();
+  if (name === 'custom') renderCustom();
+  if (name === 'analytics') renderAnalytics();
+}
+
+function updateRoleUI(){
+  const isSpec = state.currentRole === 'specialist';
+  document.getElementById('tabCustom').style.display = isSpec ? '' : 'none';
+  document.getElementById('tabAnalytics').style.display = isSpec ? '' : 'none';
+  if (!isSpec && (currentTab === 'custom' || currentTab === 'analytics')) switchTab('ipr');
+}
+
+/* ============================ TOAST ============================ */
+function toast(msg, kind){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + (kind || '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = 'toast ' + (kind || ''); }, 4000);
+}
+
+/* ============================ DEEPSEEK AI ============================ */
+/*
+  Ключ НЕ хранится в файле и НЕ пишется в localStorage.
+  Источники ключа:
+    1) window.APP_CONFIG.DEEPSEEK_API_KEY — если подключён внешний config.js
+    2) prompt() при первом обращении — хранится только в sessionStorage
+*/
+function getAiKey(){
+  if (window.APP_CONFIG && window.APP_CONFIG.DEEPSEEK_API_KEY) {
+    return String(window.APP_CONFIG.DEEPSEEK_API_KEY);
+  }
+  let sessionKey = '';
+  try { sessionKey = sessionStorage.getItem('ipr_deepseek_key') || ''; } catch(e){}
+  if (sessionKey) return sessionKey;
+
+  const entered = prompt(
+    'Введите DeepSeek API-ключ.\n\n' +
+    'Ключ не сохраняется на диск и сбрасывается при закрытии вкладки. ' +
+    'Для команды/деплоя используйте отдельный config.js (не коммитится в репозиторий).'
+  );
+  if (entered && entered.trim()) {
+    try { sessionStorage.setItem('ipr_deepseek_key', entered.trim()); } catch(e){}
+    return entered.trim();
+  }
+  return '';
+}
+
+function setAiStatus(html, kind){
+  const el = document.getElementById('aiStatus');
+  el.className = 'ai-status' + (kind ? ' ' + kind : '');
+  el.innerHTML = html;
+}
+
+function buildAiSystemPrompt(doc){
+  const hard = DICT.competencies[doc.header.role] || Object.values(DICT.competencies).flat();
+  const soft = DICT.softCompetencies;
+  const hardInd = {};
+  hard.forEach(c => { hardInd[c] = getIndicatorsForCompetency(c); });
+  const softInd = {};
+  soft.forEach(c => { softInd[c] = getIndicatorsForCompetency(c); });
+
+  return `Ты — эксперт по обучению и развитию персонала (L&D). Твоя задача — на основе краткого описания потребности сотрудника предложить 4–5 конкретных вариантов развивающих действий для индивидуального плана развития (ИПР).
+
+ТВОЯ ЛОГИКА:
+1. Проанализируй описание потребности.
+2. Определи ТИП компетенции, о которой идёт речь:
+   - hard — профессиональная/техническая, специфичная для роли (например, «Алгоритмы», «Docker», «Тест-дизайн», «Планирование»)
+   - soft — надпрофессиональная (например, «Коммуникация», «Лидерство», «Наставничество», «Эмоциональный интеллект»)
+3. Предложи КОНКРЕТНОЕ название компетенции — из списков ниже, либо сформулируй своё в том же стиле.
+4. Подбери индикатор, способ, мероприятие и критерий из списков.
+
+КРИТИЧЕСКИ ВАЖНО:
+Если у сотрудника техническая роль (Разработчик, Тестировщик, Аналитик и т.п.), но описание касается софт-навыков — ты ОБЯЗАН выбрать soft-компетенцию из списка soft-компетенций и указать competency_type="soft". НЕЛЬЗЯ подменять soft-навык hard-аналогом. Примеры:
+- «разработчику нужно научиться объяснять решения коллегам» → soft «Коммуникация», НЕ «Архитектура ПО»
+- «тестировщику нужно лучше работать в команде» → soft «Работа в команде», НЕ «Тест-дизайн»
+- «аналитику нужно развить лидерство» → soft «Лидерство», НЕ «Сбор требований»
+
+Контекст сотрудника:
+- Роль: ${doc.header.role || 'не указана'}
+- Команда: ${doc.header.team || 'не указана'}
+- Грейд: ${doc.header.grade || 'не указан'}
+
+Hard-компетенции для роли «${doc.header.role || '—'}» (можно выбирать только при competency_type="hard"):
+${JSON.stringify(hard)}
+
+Soft-компетенции, универсальные для любой роли (можно выбирать только при competency_type="soft"):
+${JSON.stringify(soft)}
+
+Индикаторы для hard-компетенций:
+${JSON.stringify(hardInd)}
+
+Индикаторы для soft-компетенций:
+${JSON.stringify(softInd)}
+
+Способы развития (выбирай из этого списка):
+${JSON.stringify(DICT.methods)}
+
+Мероприятия по развитию (выбирай из этого списка):
+${JSON.stringify(DICT.activities)}
+
+ФОРМАТ ОТВЕТА:
+Верни ТОЛЬКО валидный JSON-массив без markdown-разметки и без пояснений. Каждый элемент — объект:
+{
+  "goal": "краткая цель развития, 1 предложение до 120 символов",
+  "competency_type": "hard" | "soft",
+  "competency": "конкретное название компетенции из соответствующего списка",
+  "indicator": "индикатор из списка для этой компетенции",
+  "method": "способ из списка",
+  "activity": "мероприятие из списка",
+  "criteria": "критерий оценки результата, 1 предложение до 120 символов"
+}
+
+Требования:
+- Ровно 4 или 5 элементов.
+- Поле competency_type ОБЯЗАТЕЛЬНО и должно согласовываться с competency:
+  * competency_type="hard" → competency из списка hard-компетенций роли;
+  * competency_type="soft" → competency из списка soft-компетенций.
+- Все значения на русском языке.
+- Не оборачивай JSON в \`\`\`.
+- Если описание слишком общее, всё равно предложи конкретные варианты.`;
+}
+
+function parseAiResponse(text){
+  let clean = text.trim();
+  clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  try {
+    const arr = JSON.parse(clean);
+    if (!Array.isArray(arr)) throw new Error('not array');
+    return arr.slice(0, 5).map(item => {
+      const type = (String(item.competency_type || '').toLowerCase() === 'soft') ? 'soft' : 'hard';
+      return {
+        goal: String(item.goal || '').trim(),
+        competency_type: type,
+        competency: String(item.competency || '').trim(),
+        indicator: String(item.indicator || '').trim(),
+        method: String(item.method || '').trim(),
+        activity: String(item.activity || '').trim(),
+        criteria: String(item.criteria || '').trim()
+      };
+    }).filter(x => x.goal || x.competency || x.activity);
+  } catch(e) {
+    throw new Error('Не удалось разобрать ответ ИИ как JSON. Попробуйте ещё раз.');
+  }
+}
+
+async function askDeepSeek(prompt, doc){
+  const key = getAiKey();
+  if (!key) {
+    setAiStatus('Не удалось получить API-ключ DeepSeek. Подключите config.js или введите ключ в появившемся окне.', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('aiSuggestBtn');
+  btn.disabled = true;
+  setAiStatus('<span class="spinner"></span>DeepSeek думает…', 'loading');
+  document.getElementById('aiSuggestions').innerHTML = '';
+
+  try {
+    const resp = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + key
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: buildAiSystemPrompt(doc) },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.6,
+        max_tokens: 1400,
+        stream: false
+      })
+    });
+
+    if (!resp.ok) {
+      if (resp.status === 401 || resp.status === 403) {
+        try { sessionStorage.removeItem('ipr_deepseek_key'); } catch(e){}
+        throw new Error('DeepSeek отклонил ключ (' + resp.status + '). Ключ сброшен — введите корректный при следующем запросе.');
+      }
+      let detail = '';
+      try { const j = await resp.json(); detail = j.error?.message || JSON.stringify(j); }
+      catch(e){ detail = await resp.text().catch(() => ''); }
+      throw new Error('DeepSeek API вернул ' + resp.status + (detail ? ': ' + detail : ''));
+    }
+
+    const data = await resp.json();
+    const content = data.choices?.[0]?.message?.content;
+    if (!content) throw new Error('Пустой ответ от DeepSeek');
+
+    const suggestions = parseAiResponse(content);
+    if (!suggestions.length) throw new Error('ИИ не вернул вариантов');
+
+    lastAiSuggestions = suggestions;
+    renderAiSuggestions(suggestions);
+    const hardN = suggestions.filter(s => s.competency_type === 'hard').length;
+    const softN = suggestions.filter(s => s.competency_type === 'soft').length;
+    setAiStatus(`Готово: ${suggestions.length} вариантов (hard: ${hardN}, soft: ${softN}). Нажмите «Применить», чтобы добавить в ИПР.`, 'ok');
+  } catch(err) {
+    console.error(err);
+    let msg = err.message || 'Ошибка запроса';
+    if (/Failed to fetch|NetworkError|CORS/i.test(msg)) {
+      msg += ' Возможно, браузер блокирует прямой запрос к api.deepseek.com (CORS). Попробуйте отключить блокировщики или используйте бэкенд-прокси.';
+    }
+    setAiStatus(esc(msg), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderAiSuggestions(items){
+  const wrap = document.getElementById('aiSuggestions');
+  if (!items.length) { wrap.innerHTML = ''; return; }
+  wrap.innerHTML = items.map((it, i) => {
+    const isSoft = it.competency_type === 'soft';
+    const typeLabel = isSoft ? 'Soft' : 'Hard';
+    const typeDesc = isSoft ? 'надпрофессиональная' : 'профессиональная';
+    return `
+    <div class="suggestion">
+      <div class="head">
+        <div>
+          <div class="goal"><span class="num">${i + 1}</span>${esc(it.goal)}</div>
+        </div>
+        <span class="pill ${isSoft ? 'soft' : 'hard'}" title="Тип компетенции: ${typeDesc}">${typeLabel}</span>
+      </div>
+      <div class="detail">
+        <div><b>Тип компетенции:</b> ${isSoft ? 'Soft (надпрофессиональная)' : 'Hard (профессиональная)'}</div>
+        <div><b>Компетенция:</b> ${esc(it.competency)}</div>
+        <div><b>Индикатор:</b> ${esc(it.indicator)}</div>
+        <div><b>Способ:</b> ${esc(it.method)}</div>
+        <div><b>Мероприятие:</b> ${esc(it.activity)}</div>
+        <div><b>Критерий:</b> ${esc(it.criteria)}</div>
+      </div>
+      <div class="actions">
+        <button class="btn sm ai" data-apply-ai="${i}">Применить к ИПР</button>
+      </div>
+    </div>
+  `;
+  }).join('');
+
+  wrap.querySelectorAll('[data-apply-ai]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = +btn.dataset.applyAi;
+      const s = lastAiSuggestions[idx];
+      if (!s) return;
+      applyAiSuggestion(s);
+    });
+  });
+}
+
+function applyAiSuggestion(s){
+  const doc = getDoc(state.currentEmployeeId);
+
+  let rowIdx = doc.rows.findIndex(r => !rowHasData(r));
+  if (rowIdx === -1) {
+    doc.rows.push(emptyRow());
+    rowIdx = doc.rows.length - 1;
+  }
+
+  const row = doc.rows[rowIdx];
+  row.goal = s.goal || row.goal;
+  row.competency = s.competency || row.competency;
+  row.indicator = s.indicator || row.indicator;
+  row.method = s.method || row.method;
+  row.activity = s.activity || row.activity;
+  row.criteria = s.criteria || row.criteria;
+
+  if (!row.deadline) {
+    const d = new Date(TODAY.getFullYear(), TODAY.getMonth() + 3, TODAY.getDate());
+    row.deadline = d.toISOString().slice(0, 10);
+  }
+
+  persist();
+  renderRows();
+  const typeNote = s.competency_type === 'soft' ? ' (soft)' : ' (hard)';
+  toast('Вариант применён к строке ' + (rowIdx + 1) + typeNote);
+  document.querySelector('table.ipr').scrollIntoView({ behavior:'smooth', block:'start' });
+}
+
+/* ============================ ОБРАБОТЧИКИ ПОЛЕЙ ТАБЛИЦЫ ============================ */
+function onFieldChange(e){
+  const el = e.target;
+  if (!el.matches('input,select')) return;
+  if (el.tagName === 'SELECT' && e.type !== 'change') return;
+
+  const idx = el.dataset.idx;
+  const field = el.dataset.field;
+  if (idx == null || !field) return;
+
+  const doc = getDoc(state.currentEmployeeId);
+
+  if (el.tagName === 'SELECT' && el.value === '__custom__') {
+    const labels = { competency:'компетенцию', indicator:'индикатор', method:'способ развития', activity:'мероприятие' };
+    const val = prompt('Введите ' + labels[field] + ':');
+    if (!val || !val.trim()) { renderRows(); return; }
+    const parent = field === 'indicator' ? doc.rows[idx].competency : null;
+    state.customValues.push({
+      id: 'cv' + Date.now() + Math.random().toString(36).slice(2, 6),
+      type: field,
+      value: val.trim(),
+      parent: parent,
+      employeeId: state.currentEmployeeId,
+      addedBy: state.currentRole === 'specialist' ? 'Специалист по оценке' : 'Пользователь',
+      date: new Date().toISOString(),
+      status: 'new'
+    });
+    doc.rows[idx][field] = val.trim();
+    if (field === 'competency') doc.rows[idx].indicator = '';
+    persist();
+    renderRows();
+    updateCustomBadge();
+    toast('Добавлено кастомное значение: ' + val.trim());
+    return;
+  }
+
+  const row = doc.rows[idx];
+  if (!row) return;
+
+  row[field] = el.value;
+
+  if (field === 'competency') {
+    row.indicator = '';
+    persist();
+    renderRows();
+    return;
+  }
+  persist();
+  validateLive();
+}
+
+/* ============================ СОХРАНЕНИЕ И ОТПРАВКА ============================ */
+document.getElementById('saveBtn').addEventListener('click', () => {
+  const doc = getDoc(state.currentEmployeeId);
+  const errors = validateDoc(doc);
+  if (errors.length) {
+    validateLive();
+    toast('Исправьте ошибки в форме перед сохранением', 'err');
+    return;
+  }
+  const snapshot = JSON.parse(JSON.stringify({ header: doc.header, rows: doc.rows }));
+  const changes = doc.lastSaved ? diffDocs(doc.lastSaved, snapshot) : ['ИПР создан'];
+  const user = state.currentRole === 'specialist' ? 'Специалист по оценке' : 'Пользователь';
+  doc.versions.push({ ts: new Date().toISOString(), user: user, changes: changes });
+  doc.lastSaved = snapshot;
+  persist();
+  renderHistory();
+  updateCustomBadge();
+  toast('ИПР сохранён. Ссылка отправлена на почту сотрудника, руководителя и специалиста по оценке.', 'ok');
+});
+
+/* ============================ PDF ============================ */
+document.getElementById('pdfBtn').addEventListener('click', () => {
+  switchTab('ipr');
+  const now = new Date();
+  document.getElementById('printDate').textContent =
+    now.toLocaleDateString('ru-RU') + ' ' + now.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'});
+
+  const body = document.getElementById('rowsBody');
+  const hidden = [];
+  Array.from(body.children).forEach(tr => {
+    const vals = Array.from(tr.querySelectorAll('input,select'))
+      .map(el => el.value)
+      .filter(v => v && v !== '__custom__' && v !== '');
+    if (vals.length === 0) { tr.style.display = 'none'; hidden.push(tr); }
+  });
+  setTimeout(() => {
+    window.print();
+    hidden.forEach(tr => tr.style.display = '');
+  }, 80);
+});
+
+/* ============================ ДОБАВЛЕНИЕ / УДАЛЕНИЕ СТРОК ============================ */
+document.getElementById('rowsBody').addEventListener('input', onFieldChange);
+document.getElementById('rowsBody').addEventListener('change', onFieldChange);
+document.getElementById('rowsBody').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-del]');
+  if (!btn) return;
+  const doc = getDoc(state.currentEmployeeId);
+  const i = +btn.dataset.del;
+  doc.rows.splice(i, 1);
+  if (doc.rows.length === 0) doc.rows.push(emptyRow());
+  persist();
+  renderRows();
+});
+
+document.getElementById('addRowBtn').addEventListener('click', () => {
+  const doc = getDoc(state.currentEmployeeId);
+  doc.rows.push(emptyRow());
+  persist();
+  renderRows();
+});
+
+document.getElementById('demoFillBtn').addEventListener('click', () => {
+  const doc = getDoc(state.currentEmployeeId);
+  const role = doc.header.role;
+  const comp = (DICT.competencies[role] || [])[0] || '';
+  const ind = getIndicatorsForCompetency(comp)[0] || '';
+  const dl = new Date(TODAY.getFullYear(), TODAY.getMonth() + 3, TODAY.getDate());
+  let idx = doc.rows.findIndex(r => !rowHasData(r));
+  if (idx === -1) { doc.rows.push(emptyRow()); idx = doc.rows.length - 1; }
+  doc.rows[idx] = {
+    goal: 'Развить компетенцию для перехода на следующий грейд',
+    competency: comp,
+    indicator: ind,
+    method: DICT.methods[0],
+    activity: DICT.activities[0],
+    criteria: 'Успешная защита результатов перед командой',
+    deadline: dl.toISOString().slice(0, 10)
+  };
+  persist();
+  renderRows();
+  toast('Строка заполнена примером');
+});
+
+/* ============================ ШАПКА ============================ */
+['name','role','team','grade','evalLink','manager'].forEach(k => {
+  const el = document.getElementById('h_' + k);
+  el.addEventListener('input', () => {
+    const doc = getDoc(state.currentEmployeeId);
+    doc.header[k] = el.value;
+    persist();
+    if (k === 'role') renderRows();
+    validateLive();
+  });
+});
+
+/* ============================ AI ============================ */
+document.getElementById('aiSuggestBtn').addEventListener('click', () => {
+  const prompt = document.getElementById('aiPrompt').value.trim();
+  if (!prompt) {
+    setAiStatus('Опишите, что нужно развивать, — иначе ИИ не поймёт запрос.', 'error');
+    document.getElementById('aiPrompt').focus();
+    return;
+  }
+  const doc = getDoc(state.currentEmployeeId);
+  askDeepSeek(prompt, doc);
+});
+
+/* ============================ ВКЛАДКИ / РОЛИ / СОТРУДНИК ============================ */
+document.getElementById('tabs').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-tab]');
+  if (!btn) return;
+  switchTab(btn.dataset.tab);
+});
+
+document.getElementById('empSelect').addEventListener('change', e => {
+  state.currentEmployeeId = e.target.value;
+  persist();
+  renderHeader();
+  renderRows();
+  renderHistory();
+  document.getElementById('aiSuggestions').innerHTML = '';
+  setAiStatus('');
+});
+
+document.getElementById('roleSelect').addEventListener('change', e => {
+  state.currentRole = e.target.value;
+  persist();
+  updateRoleUI();
+});
+
+/* ============================ ИНИЦИАЛИЗАЦИЯ ============================ */
+function init(){
+  const empSel = document.getElementById('empSelect');
+  EMPLOYEES.forEach(emp => {
+    const o = document.createElement('option');
+    o.value = emp.id;
+    o.textContent = emp.name + ' (' + emp.role + ')';
+    empSel.appendChild(o);
+  });
+  empSel.value = state.currentEmployeeId;
+  document.getElementById('roleSelect').value = state.currentRole;
+
+  updateRoleUI();
+  renderHeader();
+  renderRows();
+  updateCustomBadge();
+  renderHistory();
+}
+init();
+</script>
+</body>
+</html>
